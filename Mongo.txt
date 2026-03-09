@@ -1,0 +1,15 @@
+use bubbledb
+
+show collections
+
+db.admins.find().pretty()
+
+db.workspaces.find().pretty()
+
+db.notes.find().pretty()
+
+db.todos.find().pretty()
+
+db.general.find().pretty()
+
+db.reminders.find().pretty()

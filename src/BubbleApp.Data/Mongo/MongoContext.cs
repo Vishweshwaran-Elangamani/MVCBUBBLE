@@ -2,39 +2,53 @@
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 
-namespace BubbleApp.Data.Mongo
+namespace BubbleApp.Data.Mongo;
+
+public class MongoContext
 {
-    public class MongoContext
+    public IMongoDatabase                    Db              { get; }
+    public IMongoCollection<Admin>           Admins          { get; }
+    public IMongoCollection<Workspace>       Workspaces      { get; }
+    public IMongoCollection<Note>            Notes           { get; }
+    public IMongoCollection<Todo>            Todos           { get; }     // NEW
+    public IMongoCollection<GeneralMessage>  GeneralMessages { get; }     // NEW
+    public IMongoCollection<Reminder>        Reminders       { get; }     // NEW
+
+    public MongoContext(IOptions<MongoSettings> options)
     {
-        public IMongoDatabase Db { get; }
-        public IMongoCollection<Admin> Admins { get; }
-        public IMongoCollection<Workspace> Workspaces { get; }
-        public IMongoCollection<Note> Notes { get; }
+        var s      = options.Value;
+        var client = new MongoClient(s.ConnectionString);
+        Db = client.GetDatabase(s.Database);
 
-        public MongoContext(IOptions<MongoSettings> options)
-        {
-            var s = options.Value;
-            var client = new MongoClient(s.ConnectionString);
-            Db = client.GetDatabase(s.Database);
+        Admins          = Db.GetCollection<Admin>          (s.AdminsCollection);
+        Workspaces      = Db.GetCollection<Workspace>      (s.WorkspacesCollection);
+        Notes           = Db.GetCollection<Note>           (s.NotesCollection);
+        Todos           = Db.GetCollection<Todo>           (s.TodosCollection);
+        GeneralMessages = Db.GetCollection<GeneralMessage> (s.GeneralCollection);
+        Reminders       = Db.GetCollection<Reminder>       (s.RemindersCollection);
 
-            Admins = Db.GetCollection<Admin>(s.AdminsCollection);
-            Workspaces = Db.GetCollection<Workspace>(s.WorkspacesCollection);
-            Notes = Db.GetCollection<Note>(s.NotesCollection);
+        // Workspace indexes
+        Workspaces.Indexes.CreateOne(new CreateIndexModel<Workspace>(
+            Builders<Workspace>.IndexKeys.Ascending(w => w.Slug),
+            new CreateIndexOptions { Unique = true }));
+        Workspaces.Indexes.CreateOne(new CreateIndexModel<Workspace>(
+            Builders<Workspace>.IndexKeys.Ascending(w => w.WorkspaceKeyHash),
+            new CreateIndexOptions { Unique = true }));
 
-            // Unique index on slug (already present in your bundle)
-            var wsSlug = Builders<Workspace>.IndexKeys.Ascending(w => w.Slug);
-            Workspaces.Indexes.CreateOne(new CreateIndexModel<Workspace>(wsSlug, new CreateIndexOptions { Unique = true }));
+        // Notes index
+        Notes.Indexes.CreateOne(new CreateIndexModel<Note>(
+            Builders<Note>.IndexKeys.Ascending(n => n.Workspace).Ascending(n => n.UserId).Descending(n => n.CreatedAt)));
 
-            // NEW: Unique index on key hash for fast, unambiguous lookup
-            var wsKeyHash = Builders<Workspace>.IndexKeys.Ascending(w => w.WorkspaceKeyHash);
-            Workspaces.Indexes.CreateOne(new CreateIndexModel<Workspace>(wsKeyHash, new CreateIndexOptions { Unique = true }));
+        // Todos index
+        Todos.Indexes.CreateOne(new CreateIndexModel<Todo>(
+            Builders<Todo>.IndexKeys.Ascending(t => t.Workspace).Ascending(t => t.UserId).Descending(t => t.CreatedAt)));
 
-            // Notes index (keep your existing version)
-            var noteKeys = Builders<Note>.IndexKeys
-                .Ascending(n => n.Workspace)
-                .Ascending(n => n.UserId)
-                .Descending(n => n.CreatedAt);
-            Notes.Indexes.CreateOne(new CreateIndexModel<Note>(noteKeys));
-        }
+        // General index
+        GeneralMessages.Indexes.CreateOne(new CreateIndexModel<GeneralMessage>(
+            Builders<GeneralMessage>.IndexKeys.Ascending(m => m.Workspace).Ascending(m => m.CreatedAt)));
+
+        // Reminders index
+        Reminders.Indexes.CreateOne(new CreateIndexModel<Reminder>(
+            Builders<Reminder>.IndexKeys.Ascending(r => r.Workspace).Ascending(r => r.UserId).Ascending(r => r.RemindAt)));
     }
 }

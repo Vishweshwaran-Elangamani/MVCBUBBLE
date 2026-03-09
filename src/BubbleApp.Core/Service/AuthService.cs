@@ -71,7 +71,7 @@ namespace BubbleApp.Core.Service
                 issuer: _cfg["Jwt:Issuer"],
                 audience: _cfg["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.UtcNow.AddDays(7),
+                expires: DateTime.UtcNow.AddHours(8), 
                 signingCredentials: creds
             );
 

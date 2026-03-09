@@ -1,0 +1,9 @@
+services:
+  mongo:
+    ports:
+      - "27017:27017"
+
+  api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Mongo__ConnectionString=mongodb://mongo:27017

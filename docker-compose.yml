@@ -1,0 +1,51 @@
+services:
+
+  mongo:
+    image: mongo:7
+    container_name: bubble_mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - bubble_net
+
+  api:
+    build:
+      context: .
+      dockerfile: src/BubbleApp.Api/Dockerfile
+    container_name: bubble_api
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - Mongo__ConnectionString=mongodb://mongo:27017
+      - Mongo__Database=bubbledb
+      - Jwt__Key=${JWT_KEY}
+      - Jwt__Issuer=BubbleApp
+      - Jwt__Audience=BubbleAppAdmins
+      - Widget__CdnUrl=http://localhost:3000/widget.js
+      - AllowedOrigins__0=http://localhost:5173
+      - AllowedOrigins__1=http://localhost:3000
+    ports:
+      - "5013:5013"
+    networks:
+      - bubble_net
+
+  widget:
+    build:
+      context: ./widget
+      dockerfile: Dockerfile
+    container_name: bubble_widget
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    networks:
+      - bubble_net
+
+volumes:
+  mongo_data:
+
+networks:
+  bubble_net:
+    driver: bridge

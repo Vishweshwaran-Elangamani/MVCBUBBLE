@@ -1,0 +1,12 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# Test artifacts
+**/.msCoverageSourceRootsMapping_*
+**/CoverletSourceRootsMapping_*
+**/nunit_random_seed.tmp
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,8 +1,11 @@
 using System.Text;
+using BubbleApp.Api.BackgroundServices;
 using BubbleApp.Api.OpenApi;
 using BubbleApp.Core.IService;
 using BubbleApp.Core.Service;
 using BubbleApp.Data.Config;
+using BubbleApp.Data.IRepository;
+using BubbleApp.Data.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -45,36 +48,50 @@ try
              .AllowAnyMethod());
     });
 
-    // ── Data layer (MongoDB repos) ────────────────
+    // ── Data layer (MongoDB base setup) ──────────
     builder.Services.AddDataLayer(builder.Configuration);
+
+    // ══════════════════════════════════════════════
+    // REPOSITORIES
+    // ══════════════════════════════════════════════
+
+    // General
+    builder.Services.AddSingleton<IGeneralRepository,  GeneralRepository>();
+
+    // Reminders
+    builder.Services.AddSingleton<IReminderRepository, ReminderRepository>();
 
     // ══════════════════════════════════════════════
     // CORE SERVICES
     // ══════════════════════════════════════════════
 
     // Auth
-    builder.Services.AddSingleton<IAuthService,      AuthService>();
+    builder.Services.AddSingleton<IAuthService,         AuthService>();
 
     // Workspace
-    builder.Services.AddSingleton<IWorkspaceService, WorkspaceService>();
+    builder.Services.AddSingleton<IWorkspaceService,    WorkspaceService>();
 
     // Snippet
-    builder.Services.AddSingleton<ISnippetService,   SnippetService>();
+    builder.Services.AddSingleton<ISnippetService,      SnippetService>();
 
-    // Notes  (original + UpdateAsync)
-    builder.Services.AddSingleton<INotesService,     NotesService>();
+    // Notes
+    builder.Services.AddSingleton<INotesService,        NotesService>();
 
-    // To-Do  (NEW)
-    builder.Services.AddSingleton<ITodoService,      TodoService>();
+    // To-Do
+    builder.Services.AddSingleton<ITodoService,         TodoService>();
 
-    // General chat  (NEW)
-    builder.Services.AddSingleton<IGeneralService,   GeneralService>();
+    // General chat
+    builder.Services.AddSingleton<IGeneralService,      GeneralService>();
 
-    // Reminders  (NEW)
-    builder.Services.AddSingleton<IReminderService,  ReminderService>();
+    // Reminders
+    builder.Services.AddSingleton<IReminderService,     ReminderService>();
 
-    // Workspace key validation filter  (FIX: registered ONCE — was duplicated)
-    builder.Services.AddScoped<IWorkspaceAuthService, WorkspaceAuthService>();
+    // Workspace key validation filter
+    builder.Services.AddScoped<IWorkspaceAuthService,   WorkspaceAuthService>();
+
+    // ── Background Services ───────────────────────
+    // Purges workspaces that have been soft-deleted for more than 24 hours
+    builder.Services.AddHostedService<WorkspaceCleanupService>();
 
     // ── JWT Authentication ────────────────────────
     var jwtKey      = builder.Configuration["Jwt:Key"]
@@ -132,7 +149,6 @@ try
 
     app.MapControllers();
 
-    // FIX: was App.Run() (capital A) — caused runtime crash
     app.Run();
 }
 catch (Exception ex)

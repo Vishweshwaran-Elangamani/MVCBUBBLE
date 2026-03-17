@@ -1,5 +1,6 @@
 using BubbleApp.Data.IRepository;
 using BubbleApp.Data.Mongo;
+using BubbleApp.Data.Repositories;
 using BubbleApp.Data.Repository;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

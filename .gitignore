@@ -10,3 +10,39 @@
 # OS
 .DS_Store
 Thumbs.db
+# =========================
+# SonarQube artifacts
+# =========================
+.sonarqube/
+**/FilesToAnalyze.txt
+**/ProjectOutFolderPath.txt
+**/SonarProjectConfig.xml
+
+# =========================
+# .NET / Visual Studio / VS Code basics
+# =========================
+bin/
+obj/
+TestResults/
+.vs/
+*.user
+*.suo
+*.log
+*.cache
+*.ide/
+*.nupkg
+*.snupkg
+*.VisualState.xml
+_ReSharper*/
+*.DotSettings.user
+
+# Rider/.idea
+.idea/
+
+# Coverage/analysis
+coverage*/
+*.coverage
+*.coveragexml
+
+# Packages (if not committing)
+packages/

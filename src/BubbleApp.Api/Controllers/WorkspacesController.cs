@@ -27,8 +27,10 @@ namespace BubbleApp.Api.Controllers
             ?? User.FindFirstValue("sub")
             ?? throw new InvalidOperationException("Admin id missing.");
 
+        /* ── Create ─────────────────────────────────────────── */
         [HttpPost]
-        public async Task<IActionResult> Create([FromBody] WorkspaceCreateRequest req, CancellationToken ct)
+        public async Task<IActionResult> Create(
+            [FromBody] WorkspaceCreateRequest req, CancellationToken ct)
         {
             try
             {
@@ -41,10 +43,12 @@ namespace BubbleApp.Api.Controllers
             }
         }
 
+        /* ── List ───────────────────────────────────────────── */
         [HttpGet]
         public async Task<IActionResult> List(CancellationToken ct)
             => Ok(await _svc.ListAsync(AdminId, ct));
 
+        /* ── Get by slug ────────────────────────────────────── */
         [HttpGet("{slug}")]
         public async Task<IActionResult> GetBySlug(string slug, CancellationToken ct)
         {
@@ -52,15 +56,47 @@ namespace BubbleApp.Api.Controllers
             return ws is null ? NotFound() : Ok(ws);
         }
 
-        // FIX: Delete endpoint was missing in the updated paste
+        /* ── Soft Delete (schedules 24-hour grace period) ───── */
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(string id, CancellationToken ct)
         {
-            await _svc.DeleteAsync(id, AdminId, ct);
-            AppearanceChangeBus.Bump(id);
-            return NoContent();
+            try
+            {
+                await _svc.SoftDeleteAsync(id, AdminId, ct);
+                AppearanceChangeBus.Bump(id);
+                return NoContent();
+            }
+            catch (InvalidOperationException)
+            {
+                return NotFound();
+            }
         }
 
+        /* ── Restore (cancel scheduled deletion) ────────────── */
+        [HttpPost("{id}/restore")]
+        public async Task<IActionResult> Restore(string id, CancellationToken ct)
+        {
+            try
+            {
+                await _svc.RestoreAsync(id, AdminId, ct);
+                AppearanceChangeBus.Bump(id);
+                return NoContent();
+            }
+            catch (InvalidOperationException)
+            {
+                return NotFound();
+            }
+        }
+
+        /* ── Backup: download all user data ─────────────────── */
+        [HttpGet("{id}/backup")]
+        public async Task<IActionResult> GetBackup(string id, CancellationToken ct)
+        {
+            var backup = await _svc.GetBackupAsync(id, AdminId, ct);
+            return backup is null ? NotFound() : Ok(backup);
+        }
+
+        /* ── Appearance ─────────────────────────────────────── */
         [HttpGet("{id}/appearance")]
         public async Task<IActionResult> GetAppearance(string id, CancellationToken ct)
             => Ok(await _svc.GetAppearanceAsync(id, ct));
@@ -72,10 +108,8 @@ namespace BubbleApp.Api.Controllers
             CancellationToken ct)
         {
             await _svc.UpdateAppearanceAsync(id, req, ct);
-
             var ws = await _repo.GetByIdAsync(id, ct);
             if (ws != null) AppearanceChangeBus.Bump(ws.Id);
-
             return NoContent();
         }
     }

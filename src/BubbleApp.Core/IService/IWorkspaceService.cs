@@ -11,8 +11,9 @@ namespace BubbleApp.Core.IService
         Task<string>                    GetKeyPreviewAsync(string workspaceId, CancellationToken ct = default);
         Task<WorkspaceAppearanceDto>    GetAppearanceAsync(string workspaceId, CancellationToken ct = default);
         Task                            UpdateAppearanceAsync(string workspaceId, UpdateAppearanceRequest req, CancellationToken ct = default);
-
-        // FIX: was dropped in the updated paste
         Task                            DeleteAsync(string workspaceId, string adminId, CancellationToken ct = default);
+        Task                            SoftDeleteAsync(string id, string adminId, CancellationToken ct = default);
+        Task                            RestoreAsync(string id, string adminId, CancellationToken ct = default);
+        Task<WorkspaceBackupDto?>       GetBackupAsync(string id, string adminId, CancellationToken ct = default);
     }
 }

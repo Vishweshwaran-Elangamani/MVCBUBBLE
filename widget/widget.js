@@ -61,6 +61,13 @@
     let todoFetching  = false;
     let activePatches = 0;
 
+    let genReplyTo    = null;
+    let genEditTarget = null;
+    let genMenuOpen   = null;
+
+    let deletionWarningShown = false;
+    let longPollAborted      = false;
+
     const cache = { notes: null, todo: null, general: null, reminders: null };
     let reminderTimeouts = [];
 
@@ -143,6 +150,13 @@
           <span>🌐 Workspace-wide · visible to all members</span>
         </div>
         <div class="bp-messages" id="bp-general-list"></div>
+        <div class="bp-reply-banner" id="bp-reply-banner" style="display:none">
+          <div class="bp-reply-banner-inner">
+            <span class="bp-reply-banner-label"  id="bp-reply-banner-label">Replying to @someone</span>
+            <span class="bp-reply-banner-preview" id="bp-reply-banner-preview"></span>
+          </div>
+          <button class="bp-reply-banner-close" id="bp-reply-cancel">✕</button>
+        </div>
         <div class="bp-composer">
           <textarea class="bp-input" id="bp-general-input" placeholder="Say something to the team…" rows="1"></textarea>
           <button class="bp-send"    id="bp-general-send">↑</button>
@@ -171,27 +185,31 @@
     document.body.appendChild(btn);
 
     /* ── REFS ── */
-    const notesListEl = panel.querySelector('#bp-notes-list');
-    const notesInput  = panel.querySelector('#bp-notes-input');
-    const notesSend   = panel.querySelector('#bp-notes-send');
-    const editingBar  = panel.querySelector('#bp-notes-editing-bar');
-    const cancelEdit  = panel.querySelector('#bp-notes-cancel');
-    const todoListEl  = panel.querySelector('#bp-todo-list');
-    const todoInput   = panel.querySelector('#bp-todo-input');
-    const todoSend    = panel.querySelector('#bp-todo-send');
-    const todoPri     = panel.querySelector('#bp-todo-pri');
-    const ringFill    = panel.querySelector('#bp-ring-fill');
-    const todoPct     = panel.querySelector('#bp-todo-pct');
-    const todoStat    = panel.querySelector('#bp-todo-stat');
-    const genListEl   = panel.querySelector('#bp-general-list');
-    const genInput    = panel.querySelector('#bp-general-input');
-    const genSend     = panel.querySelector('#bp-general-send');
-    const remListEl   = panel.querySelector('#bp-reminders-list');
-    const remText     = panel.querySelector('#bp-rem-text');
-    const remDt       = panel.querySelector('#bp-rem-dt');
-    const remAdd      = panel.querySelector('#bp-rem-add');
-    const selfAv      = panel.querySelector('#bp-self-av');
-    const CIRC        = 2 * Math.PI * 30;
+    const notesListEl  = panel.querySelector('#bp-notes-list');
+    const notesInput   = panel.querySelector('#bp-notes-input');
+    const notesSend    = panel.querySelector('#bp-notes-send');
+    const editingBar   = panel.querySelector('#bp-notes-editing-bar');
+    const cancelEdit   = panel.querySelector('#bp-notes-cancel');
+    const todoListEl   = panel.querySelector('#bp-todo-list');
+    const todoInput    = panel.querySelector('#bp-todo-input');
+    const todoSend     = panel.querySelector('#bp-todo-send');
+    const todoPri      = panel.querySelector('#bp-todo-pri');
+    const ringFill     = panel.querySelector('#bp-ring-fill');
+    const todoPct      = panel.querySelector('#bp-todo-pct');
+    const todoStat     = panel.querySelector('#bp-todo-stat');
+    const genListEl    = panel.querySelector('#bp-general-list');
+    const genInput     = panel.querySelector('#bp-general-input');
+    const genSend      = panel.querySelector('#bp-general-send');
+    const replyBanner  = panel.querySelector('#bp-reply-banner');
+    const replyLabel   = panel.querySelector('#bp-reply-banner-label');
+    const replyPreview = panel.querySelector('#bp-reply-banner-preview');
+    const replyCancel  = panel.querySelector('#bp-reply-cancel');
+    const remListEl    = panel.querySelector('#bp-reminders-list');
+    const remText      = panel.querySelector('#bp-rem-text');
+    const remDt        = panel.querySelector('#bp-rem-dt');
+    const remAdd       = panel.querySelector('#bp-rem-add');
+    const selfAv       = panel.querySelector('#bp-self-av');
+    const CIRC         = 2 * Math.PI * 30;
 
     /* ── POSITION ── */
     const BTN = 56;
@@ -393,7 +411,7 @@
     function paintNotes(list) {
       notesListEl.innerHTML = '';
       if (!list.length) {
-        notesListEl.innerHTML = `<div class="bp-empty">✏️<br>No notes yet.<br><small>Write your first note below</small></div>`;
+        notesListEl.innerHTML = `<div class="bp-empty"><br>No notes yet.<br><small>Write your first note below</small></div>`;
         return;
       }
       const groups = groupByDate(list);
@@ -514,7 +532,7 @@
       });
 
       if (!sorted.length) {
-        todoListEl.innerHTML = `<div class="bp-empty">✅<br>No tasks yet.</div>`;
+        todoListEl.innerHTML = `<div class="bp-empty"><br>No tasks yet.</div>`;
         return;
       }
 
@@ -633,69 +651,264 @@
     /* ════════════════════════════════
        GENERAL
     ════════════════════════════════ */
+    document.addEventListener('mousedown', e => {
+      if (!e.target.closest('.bp-gen-menu')) closeGenMenu();
+    });
+
+    function closeGenMenu() {
+      genMenuOpen = null;
+      genListEl.querySelectorAll('.bp-gen-menu-dropdown').forEach(d => d.remove());
+      genListEl.querySelectorAll('.bp-gen-menu-btn').forEach(b => b.classList.remove('active'));
+    }
+
+    replyCancel.onclick = () => clearReply();
+
+    function setReply(msg) {
+      genReplyTo = { id: msg.id, userId: msg.userId, userEmail: msg.userEmail, content: msg.content };
+      replyLabel.textContent   = `Replying to @${msg.userEmail || 'member'}`;
+      replyPreview.textContent = msg.content.length > 60 ? msg.content.slice(0, 60) + '…' : msg.content;
+      replyBanner.style.display = 'flex';
+      genInput.placeholder      = `Reply to @${msg.userEmail || 'member'}…`;
+      genInput.focus();
+    }
+
+    function clearReply() {
+      genReplyTo                = null;
+      replyBanner.style.display = 'none';
+      genInput.placeholder      = 'Say something to the team…';
+    }
+
     async function renderGeneral() {
-      if (cache.general) paintGeneral(cache.general);
+      if (cache.general) paintGeneral(cache.general, true);
+      else genListEl.innerHTML = `<div class="bp-loading">Loading…</div>`;
       try {
         const list = await apiJson(`${API}/api/general?${qs({ workspace: WORKSPACE })}`);
         cache.general = list;
-        paintGeneral(list);
+        paintGeneral(list, true);
       } catch {
         if (!cache.general)
           genListEl.innerHTML = `<div class="bp-empty bp-err">Failed to load messages.</div>`;
       }
     }
 
-    function paintGeneral(list) {
+    function paintGeneral(list, forceScroll = false) {
+      const atBottom         = genListEl.scrollHeight - genListEl.scrollTop - genListEl.clientHeight < 60;
+      const prevScrollTop    = genListEl.scrollTop;
+      const prevScrollHeight = genListEl.scrollHeight;
+
       genListEl.innerHTML = '';
       if (!list.length) {
-        genListEl.innerHTML = `<div class="bp-empty">💬<br>No messages yet.<br><small>Start the conversation!</small></div>`;
+        genListEl.innerHTML = `<div class="bp-empty"><br>No messages yet.<br><small>Start the conversation!</small></div>`;
         return;
       }
+
       const groups = groupByDate(list);
       Object.keys(groups).forEach(dk => {
         genListEl.appendChild(renderDateSep(fmtDate(groups[dk][0].createdAt)));
         groups[dk].forEach(m => {
           const isSelf  = m.userId === USER_ID;
-          const display = isSelf ? 'You' : (m.userEmail ? m.userEmail : `member·${(m.userId || '').slice(0, 6)}`);
+          const display = isSelf ? 'You' : (m.userEmail || `member·${(m.userId || '').slice(0, 6)}`);
           const initial = (display[0] || '?').toUpperCase();
           const color   = isSelf ? bubbleColor : strColor(m.userId || display);
+
           const div = document.createElement('div');
-          div.className = `bp-msg ${isSelf ? 'bp-msg-self' : 'bp-msg-other'}`;
+          div.className  = `bp-msg ${isSelf ? 'bp-msg-self' : 'bp-msg-other'}`;
+          div.dataset.id = m.id;
+
+          const replyQuoteHtml = m.replyToId ? `
+            <div class="bp-gen-reply-quote">
+              <span class="bp-gen-reply-mention">@${esc(m.replyToUserEmail || 'someone')}</span>
+              <span class="bp-gen-reply-text">${esc(
+                (m.replyToContent || '').length > 70
+                  ? m.replyToContent.slice(0, 70) + '…'
+                  : (m.replyToContent || '')
+              )}</span>
+            </div>` : '';
+
+          const editedBadge = m.isEdited ? `<span class="bp-gen-edited">(edited)</span>` : '';
+
           div.innerHTML = `
             ${!isSelf ? `<div class="bp-avatar-o" style="background:${color}">${initial}</div>` : ''}
             <div class="bp-bubble ${isSelf ? 'bp-bubble-self' : 'bp-bubble-other'}">
               ${!isSelf ? `<div class="bp-sender-name">${esc(display)}</div>` : ''}
-              <div class="bp-msg-text">${esc(m.content)}</div>
+              ${replyQuoteHtml}
+              <div class="bp-msg-text bp-gen-content" data-id="${m.id}">${esc(m.content)}</div>
               <div class="bp-msg-footer">
                 <span class="bp-msg-time">${fmtTime(m.createdAt)}</span>
+                ${editedBadge}
                 ${isSelf ? `<span class="bp-msg-tick">✓✓</span>` : ''}
               </div>
+            </div>
+            <div class="bp-gen-menu" data-id="${m.id}">
+              <button class="bp-gen-menu-btn" data-id="${m.id}" title="Actions">⋯</button>
             </div>`;
+
           genListEl.appendChild(div);
         });
       });
-      genListEl.scrollTop = genListEl.scrollHeight;
+
+      if (forceScroll || atBottom) {
+        genListEl.scrollTop = genListEl.scrollHeight;
+      } else {
+        genListEl.scrollTop = prevScrollTop + (genListEl.scrollHeight - prevScrollHeight);
+      }
+
+      attachGenHandlers();
     }
 
-    async function sendGeneral() {
-      const val = genInput.value.trim(); if (!val) return;
+    function attachGenHandlers() {
+      genListEl.querySelectorAll('.bp-gen-menu-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const id     = btn.dataset.id;
+          const msg    = cache.general && cache.general.find(m => m.id === id);
+          const isSelf = msg && msg.userId === USER_ID;
+
+          if (genMenuOpen === id) { closeGenMenu(); return; }
+          closeGenMenu();
+          genMenuOpen = id;
+          btn.classList.add('active');
+
+          const dropdown = document.createElement('div');
+          dropdown.className = 'bp-gen-menu-dropdown';
+          dropdown.innerHTML = `
+            <button class="bp-gen-menu-item" data-action="reply" data-id="${id}">↩ Reply</button>
+            ${isSelf ? `
+              <button class="bp-gen-menu-item" data-action="edit"   data-id="${id}">✏️ Edit</button>
+              <button class="bp-gen-menu-item bp-gen-menu-danger" data-action="delete" data-id="${id}">🗑️ Delete</button>
+            ` : ''}`;
+
+          btn.closest('.bp-gen-menu').appendChild(dropdown);
+
+          dropdown.querySelectorAll('.bp-gen-menu-item').forEach(item => {
+            item.onclick = (ev) => {
+              ev.stopPropagation();
+              const action = item.dataset.action;
+              const msgId  = item.dataset.id;
+              const target = cache.general && cache.general.find(m => m.id === msgId);
+              closeGenMenu();
+              if (action === 'reply'  && target) handleGenReply(target);
+              if (action === 'edit'   && target) handleGenEdit(target);
+              if (action === 'delete' && target) handleGenDelete(msgId);
+            };
+          });
+        };
+      });
+    }
+
+    function handleGenReply(msg) { setReply(msg); }
+
+    function handleGenEdit(msg) {
+      genEditTarget = { id: msg.id };
+      const contentEl = genListEl.querySelector(`.bp-gen-content[data-id="${msg.id}"]`);
+      if (!contentEl) return;
+
+      const editBox = document.createElement('div');
+      editBox.className = 'bp-gen-edit-box';
+      editBox.innerHTML = `
+        <textarea class="bp-gen-edit-input" rows="2">${msg.content}</textarea>
+        <div class="bp-gen-edit-actions">
+          <button class="bp-gen-edit-save">Save</button>
+          <button class="bp-gen-edit-cancel">Cancel</button>
+        </div>`;
+      contentEl.replaceWith(editBox);
+
+      const ta    = editBox.querySelector('.bp-gen-edit-input');
+      const saveB = editBox.querySelector('.bp-gen-edit-save');
+      const cancB = editBox.querySelector('.bp-gen-edit-cancel');
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+
+      async function saveEdit() {
+        const newContent = ta.value.trim();
+        if (!newContent) return;
+        saveB.disabled = true;
+        try {
+          await apiJson(`${API}/api/general/${msg.id}`,
+            jsonOpt('PUT', { workspace: WORKSPACE, userId: USER_ID, content: newContent }));
+          if (cache.general) {
+            const cached = cache.general.find(m => m.id === msg.id);
+            if (cached) { cached.content = newContent; cached.isEdited = true; }
+          }
+          genEditTarget = null;
+          paintGeneral(cache.general || []);
+        } catch {
+          saveB.disabled = false;
+        }
+      }
+
+      function cancelEditInline() {
+        genEditTarget = null;
+        if (cache.general) paintGeneral(cache.general);
+      }
+
+      saveB.onclick = saveEdit;
+      cancB.onclick = cancelEditInline;
+      ta.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
+        if (e.key === 'Escape') cancelEditInline();
+      });
+    }
+
+    async function handleGenDelete(id) {
+      const msgEl = genListEl.querySelector(`.bp-msg[data-id="${id}"]`);
+      if (msgEl) { msgEl.style.transition = 'opacity 0.15s'; msgEl.style.opacity = '0'; }
       try {
-        await apiJson(`${API}/api/general`,
-          jsonOpt('POST', { workspace: WORKSPACE, userId: USER_ID, userEmail: USER_EMAIL, content: val }));
-        genInput.value = ''; genInput.style.height = 'auto';
-        cache.general = null;
-        renderGeneral();
-      } catch {}
-    }
-    genSend.onclick = sendGeneral;
-    genInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendGeneral(); } });
-    genInput.addEventListener('input', () => autoResize(genInput));
-
-    setInterval(() => {
-      if (panel.style.display !== 'none' && activeTab === 'general') {
+        await apiFetch(
+          `${API}/api/general/${id}?${qs({ workspace: WORKSPACE, userId: USER_ID })}`,
+          { method: 'DELETE' });
+        if (cache.general) cache.general = cache.general.filter(m => m.id !== id);
+        setTimeout(() => { if (msgEl) msgEl.remove(); }, 150);
+      } catch {
+        if (msgEl) msgEl.style.opacity = '1';
         cache.general = null;
         renderGeneral();
       }
+    }
+
+    async function sendGeneral() {
+      const val = genInput.value.trim();
+      if (!val) return;
+
+      const body = { workspace: WORKSPACE, userId: USER_ID, userEmail: USER_EMAIL, content: val };
+      if (genReplyTo) {
+        body.replyToId        = genReplyTo.id;
+        body.replyToUserId    = genReplyTo.userId;
+        body.replyToUserEmail = genReplyTo.userEmail;
+        body.replyToContent   = genReplyTo.content;
+      }
+
+      try {
+        const newMsg = await apiJson(`${API}/api/general`, jsonOpt('POST', body));
+        genInput.value = '';
+        genInput.style.height = 'auto';
+        clearReply();
+        if (newMsg && cache.general) {
+          cache.general.push(newMsg);
+          paintGeneral(cache.general, true);
+        } else {
+          cache.general = null;
+          renderGeneral();
+        }
+      } catch {}
+    }
+
+    genSend.onclick = sendGeneral;
+    genInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendGeneral(); }
+    });
+    genInput.addEventListener('input', () => autoResize(genInput));
+
+    setInterval(async () => {
+      if (panel.style.display === 'none' || activeTab !== 'general' || genEditTarget) return;
+      try {
+        const list     = await apiJson(`${API}/api/general?${qs({ workspace: WORKSPACE })}`);
+        const prevLen  = cache.general ? cache.general.length : -1;
+        const prevLast = cache.general && cache.general.length ? cache.general[cache.general.length - 1].id : null;
+        const newLast  = list.length ? list[list.length - 1].id : null;
+        cache.general  = list;
+        if (list.length !== prevLen || newLast !== prevLast) paintGeneral(list);
+      } catch {}
     }, 6000);
 
     /* ════════════════════════════════
@@ -852,13 +1065,16 @@
     }
     checkReminders();
 
-    /* ── APPEARANCE ── */
+    /* ════════════════════════════════════════════════════
+       APPEARANCE + SOFT-DELETE HANDLING
+    ════════════════════════════════════════════════════ */
     function updateTabAccent() {
       panel.querySelectorAll('.bp-tab.active').forEach(t => {
         t.style.color             = bubbleColor;
         t.style.borderBottomColor = bubbleColor;
       });
     }
+
     function applyAppearance(cfg) {
       if (!cfg) return;
       if (cfg.color && typeof cfg.color === 'string') {
@@ -874,25 +1090,328 @@
       }
     }
 
+    /* ── Deletion warning banner ── */
+    function buildWarningMsg(hoursLeft) {
+      if (!hoursLeft || hoursLeft <= 0)
+        return '⚠️ This workspace is pending permanent deletion. Contact your admin.';
+      if (hoursLeft === 1)
+        return '⚠️ This workspace deletes in ~1 hour — contact your admin immediately!';
+      return `⚠️ This workspace will be deleted in ~${hoursLeft}h — contact your admin.`;
+    }
+
+    function showDeletionWarning(hoursLeft) {
+      const existing = document.getElementById('bp-deletion-warning');
+      if (existing) {
+        const textEl = existing.querySelector('.bp-dw-text');
+        if (textEl) textEl.textContent = buildWarningMsg(hoursLeft);
+        const urgent = hoursLeft <= 6;
+        existing.style.background   = urgent ? '#fef2f2' : '#fffbeb';
+        existing.style.borderBottom = `1px solid ${urgent ? '#fecaca' : '#fde68a'}`;
+        existing.style.color        = urgent ? '#dc2626' : '#92400e';
+        const backupBtn = existing.querySelector('button');
+        if (backupBtn) backupBtn.style.background = urgent ? '#dc2626' : '#92400e';
+        return;
+      }
+
+      deletionWarningShown = true;
+      const urgent = hoursLeft <= 6;
+      const banner = document.createElement('div');
+      banner.id    = 'bp-deletion-warning';
+      banner.style.cssText = [
+        'display:flex',
+        'flex-direction:column',
+        'gap:6px',
+        'padding:8px 14px',
+        `background:${urgent ? '#fef2f2' : '#fffbeb'}`,
+        `border-bottom:1px solid ${urgent ? '#fecaca' : '#fde68a'}`,
+        'font-size:12px',
+        'font-weight:600',
+        `color:${urgent ? '#dc2626' : '#92400e'}`,
+        'flex-shrink:0',
+        'line-height:1.5',
+      ].join(';');
+
+      const topRow = document.createElement('div');
+      topRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+      topRow.innerHTML =
+        `<span style="font-size:15px;flex-shrink:0">${urgent ? '🔴' : '⏳'}</span>` +
+        `<span class="bp-dw-text">${buildWarningMsg(hoursLeft)}</span>`;
+
+      const backupBtn = document.createElement('button');
+      backupBtn.textContent = '💾 Backup my data';
+      backupBtn.style.cssText = [
+        'align-self:flex-start',
+        'margin-left:23px',
+        'padding:4px 12px',
+        'font-size:11px',
+        'font-weight:700',
+        'border:none',
+        'border-radius:6px',
+        `background:${urgent ? '#dc2626' : '#92400e'}`,
+        'color:#fff',
+        'cursor:pointer',
+        'opacity:0.9',
+      ].join(';');
+      backupBtn.onmouseenter = () => backupBtn.style.opacity = '1';
+      backupBtn.onmouseleave = () => backupBtn.style.opacity = '0.9';
+      backupBtn.onclick      = downloadWidgetBackup;
+
+      banner.appendChild(topRow);
+      banner.appendChild(backupBtn);
+
+      const tabs = panel.querySelector('.bp-tabs');
+      if (tabs) panel.insertBefore(banner, tabs);
+    }
+
+    function clearDeletionWarning() {
+      const el = document.getElementById('bp-deletion-warning');
+      if (el) { el.remove(); deletionWarningShown = false; }
+    }
+
+    /* ════════════════════════════════════════════════════
+       BACKUP — download as formatted Word .doc
+       (Notes, Todos, Reminders only — General excluded)
+    ════════════════════════════════════════════════════ */
+    async function downloadWidgetBackup() {
+      const backupBtn = document.querySelector('#bp-deletion-warning button');
+      if (backupBtn) { backupBtn.textContent = '⏳ Preparing…'; backupBtn.disabled = true; }
+
+      try {
+        const res = await apiFetch(
+          `${API}/api/widget/backup?${qs({ workspace: WORKSPACE, userId: USER_ID })}`
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const html = buildBackupDoc(data);
+
+        const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `bubble-backup-${WORKSPACE}-${new Date().toISOString().slice(0, 10)}.doc`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+
+        if (backupBtn) backupBtn.textContent = '✅ Downloaded!';
+        setTimeout(() => {
+          if (backupBtn) { backupBtn.textContent = '💾 Backup my data'; backupBtn.disabled = false; }
+        }, 3000);
+
+      } catch {
+        if (backupBtn) { backupBtn.textContent = '❌ Failed — retry'; backupBtn.disabled = false; }
+      }
+    }
+
+    function buildBackupDoc(data) {
+      const exportDate = new Date(data.exportedAt).toLocaleString();
+      const priEmoji   = { high: '🔴', medium: '🟡', low: '🟢' };
+
+      function section(title, emoji, rows) {
+        if (!rows.length) return `
+          <h2 style="color:#5b8def;border-bottom:2px solid #5b8def;padding-bottom:6px;margin-top:32px">
+            ${emoji} ${title}
+            <span style="font-size:13px;color:#94a3b8;font-weight:400">(0 items)</span>
+          </h2>
+          <p style="color:#94a3b8;font-style:italic;margin:8px 0 0 0">No ${title.toLowerCase()} found.</p>`;
+        return `
+          <h2 style="color:#5b8def;border-bottom:2px solid #5b8def;padding-bottom:6px;margin-top:32px">
+            ${emoji} ${title}
+            <span style="font-size:13px;color:#94a3b8;font-weight:400">(${rows.length} item${rows.length !== 1 ? 's' : ''})</span>
+          </h2>
+          ${rows.join('')}`;
+      }
+
+      function card(content) {
+        return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #5b8def;
+                            border-radius:6px;padding:12px 16px;margin:10px 0;font-size:13px;
+                            line-height:1.6;color:#0f172a">${content}</div>`;
+      }
+
+      function meta(label, value) {
+        return `<span style="font-size:11px;color:#64748b;margin-right:16px"><b>${label}:</b> ${value}</span>`;
+      }
+
+      function fmt(iso) {
+        try { return new Date(iso).toLocaleString(); } catch { return iso; }
+      }
+
+      /* ── Notes ── */
+      const noteRows = (data.notes || []).map(n => card(`
+        <div style="margin-bottom:6px">${esc(n.content)}</div>
+        <div>${meta('Created', fmt(n.createdAt))}</div>`));
+
+      /* ── Todos ── */
+      const todoRows = (data.todos || []).map(t => card(`
+        <div style="margin-bottom:6px">
+          ${t.done
+            ? `<span style="color:#22c55e;font-weight:700">✓</span>`
+            : `<span style="color:#94a3b8">○</span>`}
+          <span style="margin-left:8px;${t.done ? 'text-decoration:line-through;color:#94a3b8' : ''}">
+            ${esc(t.content)}
+          </span>
+        </div>
+        <div>
+          ${meta('Status',   t.done ? '✅ Done' : '⏳ Pending')}
+          ${meta('Priority', `${priEmoji[t.priority] || '🟡'} ${t.priority || 'medium'}`)}
+          ${meta('Created',  fmt(t.createdAt))}
+        </div>`));
+
+      /* ── Reminders ── */
+      const remRows = (data.reminders || []).map(r => {
+        const due = !r.acknowledged && new Date(r.remindAt) <= new Date();
+        return card(`
+          <div style="margin-bottom:6px">${esc(r.content)}</div>
+          <div>
+            ${meta('Remind At',    fmt(r.remindAt))}
+            ${meta('Acknowledged', r.acknowledged ? '✅ Yes' : due ? '🔔 Due now!' : '⏳ Pending')}
+            ${meta('Created',      fmt(r.createdAt))}
+          </div>`);
+      });
+
+      return `
+<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="UTF-8">
+  <title>Bubble Backup — ${esc(data.workspace || WORKSPACE)}</title>
+  <!--[if gte mso 9]>
+  <xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml>
+  <![endif]-->
+  <style>
+    body  { font-family: Calibri, Arial, sans-serif; font-size: 13px;
+            color: #0f172a; margin: 40px; line-height: 1.6; }
+    h1    { color: #1e3a8a; font-size: 22px; margin-bottom: 4px; }
+    h2    { font-size: 16px; page-break-inside: avoid; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+    td,th { padding: 6px 10px; border: 1px solid #e2e8f0; font-size: 12px; }
+    th    { background: #f1f5f9; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <!-- COVER -->
+  <div style="border-bottom:3px solid #5b8def;padding-bottom:20px;margin-bottom:8px">
+    <h1>💬 Bubble — Data Backup</h1>
+    <table style="border:none;width:auto;margin-top:12px">
+      <tr>
+        <td style="border:none;padding:3px 16px 3px 0;color:#64748b;font-size:12px"><b>Workspace</b></td>
+        <td style="border:none;padding:3px 0;font-size:12px">${esc(data.workspace || WORKSPACE)}</td>
+      </tr>
+      <tr>
+        <td style="border:none;padding:3px 16px 3px 0;color:#64748b;font-size:12px"><b>Slug</b></td>
+        <td style="border:none;padding:3px 0;font-size:12px">${esc(data.slug || WORKSPACE)}</td>
+      </tr>
+      <tr>
+        <td style="border:none;padding:3px 16px 3px 0;color:#64748b;font-size:12px"><b>User ID</b></td>
+        <td style="border:none;padding:3px 0;font-size:12px">${esc(String(data.userId || USER_ID))}</td>
+      </tr>
+      <tr>
+        <td style="border:none;padding:3px 16px 3px 0;color:#64748b;font-size:12px"><b>Exported At</b></td>
+        <td style="border:none;padding:3px 0;font-size:12px">${exportDate}</td>
+      </tr>
+      <tr>
+        <td style="border:none;padding:3px 16px 3px 0;color:#64748b;font-size:12px"><b>Total Items</b></td>
+        <td style="border:none;padding:3px 0;font-size:12px">
+          ${(data.notes     || []).length} notes ·
+          ${(data.todos     || []).length} tasks ·
+          ${(data.reminders || []).length} reminders
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- SECTIONS -->
+  ${section('Notes',       '📝', noteRows)}
+  ${section('To-Do Tasks', '✅', todoRows)}
+  ${section('Reminders',   '🔔', remRows)}
+
+  <!-- FOOTER -->
+  <div style="margin-top:48px;padding-top:16px;border-top:1px solid #e2e8f0;
+              font-size:11px;color:#94a3b8;text-align:center">
+    Generated by <b>Bubble</b> · ${exportDate} · workspace <b>${esc(data.slug || WORKSPACE)}</b>
+  </div>
+
+</body>
+</html>`;
+    }
+
+    /* ── initAppearance ── */
     async function initAppearance() {
       try {
-        const cfg = await apiJson(`${API}/api/widget/config?${qs({ workspace: WORKSPACE })}`);
-        applyAppearance(cfg); version = cfg.version || 0;
+        const res = await apiFetch(`${API}/api/widget/config?${qs({ workspace: WORKSPACE })}`);
+
+        if (res.status === 404 || res.status === 401) {
+          longPollAborted = true;
+          return;
+        }
+        if (res.status === 410) {
+          try {
+            const cfg = await res.json();
+            applyAppearance(cfg);
+            version = cfg.version || 0;
+            showDeletionWarning(cfg.hoursLeft || 0);
+          } catch {}
+          return;
+        }
+        if (res.ok) {
+          const cfg = await res.json();
+          applyAppearance(cfg);
+          version = cfg.version || 0;
+        }
       } catch {}
     }
+
+    /* ── longPoll ── */
     async function longPoll() {
+      if (longPollAborted) return;
+
       while (true) {
+        if (longPollAborted) return;
         try {
-          const res = await apiFetch(`${API}/api/widget/config/long?${qs({ workspace: WORKSPACE, since: version })}`);
-          if (res.status === 200) {
-            const cfg = await res.json();
-            applyAppearance(cfg); version = cfg.version || version;
+          const res = await apiFetch(
+            `${API}/api/widget/config/long?${qs({ workspace: WORKSPACE, since: version })}`
+          );
+
+          if (res.status === 404 || res.status === 401) {
+            longPollAborted     = true;
+            panel.style.display = 'none';
+            btn.style.display   = 'none';
+            return;
           }
+
+          if (res.status === 410) {
+            try {
+              const cfg = await res.json();
+              version = cfg.version || version;
+              applyAppearance(cfg);
+              showDeletionWarning(cfg.hoursLeft || 0);
+            } catch {}
+            await new Promise(r => setTimeout(r, 5000));
+            continue;
+          }
+
+          if (res.status === 204) { continue; }
+
+          if (res.ok) {
+            const cfg = await res.json();
+            applyAppearance(cfg);
+            version = cfg.version || version;
+            clearDeletionWarning();
+            continue;
+          }
+
+          await new Promise(r => setTimeout(r, 5000));
+
         } catch {
           await new Promise(r => setTimeout(r, 2000));
         }
       }
     }
+
     initAppearance().then(longPoll);
 
     /* ════════════════════════════════════════
@@ -904,34 +1423,20 @@
       USER_EMAIL   = user.email || '';
       USER_DISPLAY = USER_EMAIL || `user·${USER_ID.slice(0, 6)}`;
       USER_INITIAL = (USER_DISPLAY[0] || '?').toUpperCase();
-      if (selfAv) {
-        selfAv.textContent      = USER_INITIAL;
-        selfAv.style.background = bubbleColor;
-      }
-      cache.notes     = null;
-      cache.todo      = null;
-      cache.general   = null;
-      cache.reminders = null;
+      if (selfAv) { selfAv.textContent = USER_INITIAL; selfAv.style.background = bubbleColor; }
+      cache.notes = null; cache.todo = null; cache.general = null; cache.reminders = null;
       btn.style.display = 'flex';
       checkReminders();
     };
 
-    /* ✅ Full teardown on hide — resets boot flag for clean re-login */
     window.__bubble_hide = function () {
       panel.style.display = 'none';
       btn.style.display   = 'none';
-
-      cache.notes     = null;
-      cache.todo      = null;
-      cache.general   = null;
-      cache.reminders = null;
+      longPollAborted     = true;
+      cache.notes = null; cache.todo = null; cache.general = null; cache.reminders = null;
       window.BUBBLE_USER = null;
-
-      // Remove DOM completely
       if (btn   && btn.parentNode)   btn.parentNode.removeChild(btn);
       if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
-
-      // ✅ Reset boot flag — widget will fully re-init on next login
       window.__BUBBLE_BOOTED__ = false;
       window.__bubble_show     = undefined;
       window.__bubble_hide     = undefined;

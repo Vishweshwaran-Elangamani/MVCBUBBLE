@@ -1,3 +1,5 @@
+mongosh
+
 use bubbledb
 
 show collections
